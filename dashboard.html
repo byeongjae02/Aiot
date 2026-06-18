@@ -1,0 +1,285 @@
+<!DOCTYPE html>  <!-- 이 문서가 HTML5 문서임을 선언 -->
+<html lang="ko">  <!-- 문서 언어를 한국어로 지정 -->
+<head>
+<meta charset="UTF-8">  <!-- 한글이 깨지지 않도록 문자 인코딩을 UTF-8로 지정 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">  <!-- 모바일에서도 화면 폭에 맞게 표시되도록 설정 -->
+<title>SeatSense · 무인 카페 좌석 효율 분석</title>  <!-- 브라우저 탭에 표시될 제목 지정 -->
+<style>
+  /* ===== 대시보드 전체 디자인(CSS) =====
+     :root 변수로 배경/패널/강조색(앰버=점유, 청록=음료, 파랑=남성)을 정의하고,
+     아래에서 헤더·KPI 카드·운영 제안·그래프 막대·상태바 등 각 요소의 모양과 색을 지정함 */
+  @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');  /* 한글 폰트(Pretendard) 불러옴, 인터넷 없으면 시스템 폰트로 대체 */
+  :root{  /* 화면 전체에서 공통으로 쓰는 색상 변수 정의 */
+    --bg:#0E1726; --panel:#16223A; --panel-2:#1C2C49; --line:rgba(255,255,255,.08);
+    --txt:#E8EDF5; --muted:#8A99B0;
+    --amber:#FFB23E;     /* 점유/혼잡 강조색 */
+    --work:#FFB23E;      /* 작업형 색 */
+    --drink:#4FD1C5;     /* 음료형 색 */
+    --male:#5B8DEF; --female:#4FD1C5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}  /* 모든 요소의 기본 여백 제거 */
+  body{background:var(--bg);color:var(--txt);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    -webkit-font-smoothing:antialiased;padding:28px 20px 48px;min-height:100vh}  /* 어두운 배경·기본 글꼴·여백 지정 */
+  .wrap{max-width:980px;margin:0 auto}  /* 전체 내용을 가운데 정렬·최대 폭 제한 */
+
+  /* 상단 헤더 영역 스타일 */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;margin-bottom:24px;border-bottom:1px solid var(--line);padding-bottom:20px}
+  .brand .eyebrow{font-size:11px;letter-spacing:.22em;color:var(--amber);font-weight:700;text-transform:uppercase}
+  .brand h1{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+  .brand p{color:var(--muted);font-size:13px;margin-top:6px}
+  .live{text-align:right;font-size:12px;color:var(--muted);line-height:1.7}
+  .live b{color:var(--txt);font-size:13px}
+  .live .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);
+    margin-right:6px;box-shadow:0 0 0 0 rgba(255,178,62,.5);animation:pulse 2s infinite}  /* 깜빡이는 실시간 표시점 */
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,178,62,.5)}70%{box-shadow:0 0 0 8px rgba(255,178,62,0)}100%{box-shadow:0 0 0 0 rgba(255,178,62,0)}}
+
+  /* KPI 카드(핵심 지표) 스타일 */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .kpi .label{font-size:11px;color:var(--muted)}
+  .kpi .value{font-size:27px;font-weight:800;margin-top:8px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .kpi .value.amber{color:var(--amber)}
+  .kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+  /* 운영 제안 카드 스타일 */
+  .tips{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+  .tip{background:linear-gradient(90deg,rgba(255,178,62,.10),rgba(255,178,62,0));
+    border:1px solid rgba(255,178,62,.28);border-left:3px solid var(--amber);
+    border-radius:10px;padding:13px 16px;font-size:13.5px;line-height:1.5}
+  .tip b{color:var(--amber)}
+
+  /* 패널(각 분석 영역) 공통 스타일 */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin-bottom:18px}
+  .panel h2{font-size:14px;font-weight:700}
+  .panel .hint{font-size:12px;color:var(--muted);margin-top:4px}
+
+  /* 시간대별 점유율 막대그래프(리본) 스타일 */
+  .ribbon{display:flex;align-items:flex-end;gap:4px;height:170px;margin-top:22px}
+  .hr{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%}
+  .hr .cnt{font-size:9px;color:var(--muted);height:11px;font-variant-numeric:tabular-nums}
+  .hr .bar-wrap{flex:1;width:100%;display:flex;align-items:flex-end}
+  .hr .bar{width:100%;background:var(--panel-2);border-radius:5px 5px 0 0;min-height:3px;transition:height .5s ease}
+  .hr.peak .bar{background:var(--amber);box-shadow:0 0 14px rgba(255,178,62,.45)}  /* 피크 시간대 막대 강조 */
+  .hr.hot .bar{background:rgba(255,178,62,.55)}  /* 혼잡한 시간대 막대 색 */
+  .hr .tick{font-size:9px;color:var(--muted)}
+  .hr.peak .tick{color:var(--amber);font-weight:700}
+
+  /* 이용 유형 비율 막대(작업형/음료형/기타) 스타일 */
+  .split{display:flex;height:34px;border-radius:9px;overflow:hidden;margin-top:18px;background:var(--panel-2)}
+  .split .seg{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+    color:#0E1726;transition:width .5s ease;white-space:nowrap;padding:0 10px}
+  .seg.w{background:var(--work)} .seg.d{background:var(--drink)} .seg.e{background:#3A4A66;color:var(--muted)}
+  .legend{display:flex;gap:18px;margin-top:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+
+  /* 평균 체류시간 박스 스타일 */
+  .dwell{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .dwell .box{background:var(--panel-2);border-radius:12px;padding:16px 18px}
+  .dwell .t{font-size:12px;color:var(--muted)}
+  .dwell .v{font-size:24px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums}
+  .dwell .box.work .v{color:var(--work)} .dwell .box.drink .v{color:var(--drink)}
+  .dwell .v small{font-size:13px;font-weight:600;color:var(--muted)}
+
+  footer{color:var(--muted);font-size:11px;text-align:center;margin-top:26px;line-height:1.6}
+  @media(max-width:680px){.kpis{grid-template-columns:repeat(2,1fr)}.ribbon{height:130px}.brand h1{font-size:24px}}  /* 모바일 화면 대응 */
+</style>
+</head>
+<body>
+<div class="wrap">  <!-- 전체 내용을 가운데 정렬로 감싸는 컨테이너 -->
+
+  <header>  <!-- 상단 제목 영역 -->
+    <div class="brand">  <!-- 제품명·설명 영역 -->
+      <div class="eyebrow">UNMANNED CAFE · SEAT EFFICIENCY</div>  <!-- 작은 영문 부제목 -->
+      <h1>SeatSense</h1>  <!-- 제품명 -->
+      <p>무인 카페 좌석 효율 분석 · 누가 작업하러 오고, 좌석은 얼마나 도는가</p>  <!-- 한 줄 설명 -->
+    </div>
+    <div class="live">  <!-- 실시간 상태 표시 영역 -->
+      <div><span class="dot"></span><span id="live-line">연결 중…</span></div>  <!-- 현재 인원·점유율·유형이 표시될 자리 -->
+      <div id="updated" style="margin-top:4px"></div>  <!-- 마지막 갱신 시각이 표시될 자리 -->
+    </div>
+  </header>
+
+  <div class="kpis">  <!-- 핵심 지표(KPI) 카드 4개 영역 -->
+    <div class="kpi"><div class="label">오늘 방문 세션</div>
+      <div class="value amber" id="k-total">0</div><div class="sub">누적 이용 건수</div></div>  <!-- 오늘 방문 세션 수 자리 -->
+    <div class="kpi"><div class="label">평균 좌석 점유율</div>
+      <div class="value" id="k-occ">–</div><div class="sub" id="k-seats">좌석 기준</div></div>  <!-- 평균 좌석 점유율 자리 -->
+    <div class="kpi"><div class="label">작업형 비중</div>
+      <div class="value" id="k-work">–</div><div class="sub">노트북·책 이용</div></div>  <!-- 작업형 비중 자리 -->
+    <div class="kpi"><div class="label">피크 점유 시간</div>
+      <div class="value" id="k-peak">–</div><div class="sub" id="k-peak-sub">가장 혼잡</div></div>  <!-- 피크 점유 시간 자리 -->
+  </div>
+
+  <div class="tips" id="tips"></div>  <!-- 자동 운영 개선 제안이 채워질 자리 -->
+
+  <section class="panel">  <!-- 실시간 카메라(CCTV) 패널 -->
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2>실시간 카메라 <span style="font-size:11px;color:var(--muted);font-weight:400">· AI 검출 화면</span></h2>  <!-- 패널 제목 -->
+      <span id="cam-badge" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;
+        font-weight:700;color:#FF5C5C;letter-spacing:.08em">
+        <span style="width:8px;height:8px;border-radius:50%;background:#FF5C5C;
+          box-shadow:0 0 0 0 rgba(255,92,92,.5);animation:pulse 1.6s infinite"></span>LIVE</span>  <!-- 빨간 LIVE 표시 -->
+    </div>
+    <p class="hint">사람·노트북·책·컵·병을 실시간으로 인식 (박스 = AI가 잡은 객체)</p>  <!-- 안내 문구 -->
+    <div style="margin-top:16px;border-radius:12px;overflow:hidden;background:#000;
+      aspect-ratio:4/3;display:flex;align-items:center;justify-content:center">
+      <img id="cam" alt="실시간 카메라" style="width:100%;height:100%;object-fit:contain;display:none">  <!-- analyze.py가 송출하는 실시간 영상이 표시될 자리 -->
+      <span id="cam-msg" style="color:var(--muted);font-size:13px">카메라 연결 중… (analyze.py 실행 필요)</span>  <!-- 영상 연결 전 안내 문구 -->
+    </div>
+  </section>
+
+  <section class="panel">  <!-- 시간대별 좌석 점유율 그래프 패널 -->
+    <h2>시간대별 좌석 점유율</h2>  <!-- 패널 제목 -->
+    <p class="hint">좌석은 곧 재고 — 회전이 막히는 시간을 찾아 요금제·좌석배치로 개선</p>  <!-- 안내 문구 -->
+    <div class="ribbon" id="ribbon"></div>  <!-- 24개 시간대 막대그래프가 채워질 자리 -->
+  </section>
+
+  <section class="panel">  <!-- 이용 유형 비교 패널 -->
+    <h2>이용 유형 비교</h2>  <!-- 패널 제목 -->
+    <p class="hint">작업형(장시간 체류) vs 음료형(빠른 회전) — 메뉴·공간 전략의 근거</p>  <!-- 안내 문구 -->
+    <div class="split" id="split"></div>  <!-- 작업형/음료형/기타 비율 막대가 채워질 자리 -->
+    <div class="legend">  <!-- 범례 -->
+      <span><i style="background:var(--work)"></i>작업형 <b id="leg-w">0</b></span>  <!-- 작업형 세션 수 -->
+      <span><i style="background:var(--drink)"></i>음료형 <b id="leg-d">0</b></span>  <!-- 음료형 세션 수 -->
+      <span><i style="background:#3A4A66"></i>기타 <b id="leg-e">0</b></span>  <!-- 기타 세션 수 -->
+    </div>
+    <div class="dwell">  <!-- 평균 체류시간 박스 영역 -->
+      <div class="box work"><div class="t">작업형 평균 체류</div><div class="v" id="dw-w">–<small> 분</small></div></div>  <!-- 작업형 평균 체류시간 자리 -->
+      <div class="box drink"><div class="t">음료형 평균 체류</div><div class="v" id="dw-d">–<small> 분</small></div></div>  <!-- 음료형 평균 체류시간 자리 -->
+    </div>
+  </section>
+
+  <section class="panel">  <!-- 성별 분포 패널 (보조 지표) -->
+    <h2>성별 분포 <span style="font-size:11px;color:var(--muted);font-weight:400">(보조 지표 · 추정치)</span></h2>  <!-- 패널 제목 -->
+    <div class="split" id="gsplit" style="margin-top:14px"></div>  <!-- 남/여/미상 비율 막대가 채워질 자리 -->
+    <div class="legend">  <!-- 범례 -->
+      <span><i style="background:var(--male)"></i>남성 <b id="g-m">0</b></span>  <!-- 남성 세션 수 -->
+      <span><i style="background:var(--female)"></i>여성 <b id="g-f">0</b></span>  <!-- 여성 세션 수 -->
+      <span><i style="background:#3A4A66"></i>미상 <b id="g-u">0</b></span>  <!-- 미상 세션 수 -->
+    </div>
+  </section>
+
+  <footer>  <!-- 하단 안내 문구 -->
+    얼굴·영상은 저장하지 않으며 집계 수치만 기록합니다 (개인정보 보호).<br>
+    좌석 점유율은 분 단위 동시 인원의 근사치이며, 데이터 출처는 매장 카메라 실시간 분석(analyze.py)입니다.
+  </footer>
+</div>
+
+<script>
+  // 한 시간대의 평균 점유율(%)을 계산하는 함수 (점유 인원 합 ÷ 표본 수 ÷ 좌석 수)
+  function avgOcc(cell, seats){ return cell.occ_n>0 ? (cell.occ_sum/cell.occ_n)/seats*100 : 0; }
+
+  async function refresh(){  // 서버에서 최신 통계를 받아 화면을 갱신하는 함수 정의
+    let d;  // 통계 데이터를 담을 변수
+    try{ d = await (await fetch('/api/stats')).json(); }  // /api/stats 주소에서 통계를 받아옴
+    catch(e){ document.getElementById('live-line').textContent='서버 연결 대기 중'; return; }  // 실패 시 안내 후 종료
+
+    const seats = d.seats || 8;  // 좌석 수를 가져옴 (없으면 8)
+    document.getElementById('k-total').textContent = d.total || 0;  // 오늘 방문 세션 수를 화면에 표시
+    document.getElementById('k-seats').textContent = seats + '석 기준';  // 좌석 수 안내 표시
+    document.getElementById('updated').textContent = '갱신 ' + (d.updated || '–');  // 갱신 시각 표시
+
+    // 실시간 라인(현재 인원·점유율·유형) 갱신
+    const lv = d.live || {persons:0,type:'-',occ_pct:0};  // 실시간 상태를 가져옴
+    document.getElementById('live-line').innerHTML =  // 현재 인원·점유율·유형을 상단에 표시
+      `현재 <b>${lv.persons}명</b> · 점유율 <b>${lv.occ_pct}%</b> · 유형 <b>${lv.type}</b>`;
+
+    // 시간대별 점유율 리본 그리기
+    const hourly = d.hourly || {};  // 시간대별 통계를 가져옴
+    let occMax=0, peakHour=null;  // 최대 점유율·피크 시간 초기화
+    const occArr=[];  // 시간대별 점유율을 담을 배열
+    for(let h=0;h<24;h++){  // 0시부터 23시까지 순회
+      const c = hourly[String(h).padStart(2,'0')] || {occ_sum:0,occ_n:0,sessions:0};  // 해당 시간대 통계를 가져옴
+      const v = avgOcc(c, seats);  // 그 시간대 평균 점유율을 계산
+      occArr.push(v);  // 배열에 저장
+      if(v>occMax){occMax=v;peakHour=h;}  // 가장 높은 점유율과 그 시간을 기록
+    }
+    const ribbon=document.getElementById('ribbon'); ribbon.innerHTML='';  // 막대그래프 영역을 비움
+    for(let h=0;h<24;h++){  // 24개 시간대 막대를 생성
+      const v=occArr[h];  // 해당 시간대 점유율
+      const cls = (h===peakHour&&v>0)?'peak':(v>=60?'hot':'');  // 피크/혼잡 여부에 따라 막대 색 클래스 결정
+      const el=document.createElement('div'); el.className='hr '+cls;  // 막대 요소 생성
+      el.innerHTML=`<div class="cnt">${v>0?Math.round(v)+'%':''}</div>
+        <div class="bar-wrap"><div class="bar" style="height:${Math.max(3,v)}%"></div></div>
+        <div class="tick">${h}</div>`;  // 막대 높이와 시각 표시
+      ribbon.appendChild(el);  // 막대를 그래프에 추가
+    }
+    // 전체 평균 점유율(데이터가 있는 시간대들의 평균) 계산
+    const used = occArr.filter((v,h)=> (hourly[String(h).padStart(2,'0')]||{}).occ_n>0);  // 표본이 있는 시간대만 추림
+    const occAvg = used.length? used.reduce((a,b)=>a+b,0)/used.length : 0;  // 그 평균을 계산
+    document.getElementById('k-occ').textContent = used.length? Math.round(occAvg)+'%' : '–';  // 평균 점유율 KPI 표시
+    document.getElementById('k-peak').textContent = peakHour!==null&&occMax>0? peakHour+'시' : '–';  // 피크 시간 KPI 표시
+    document.getElementById('k-peak-sub').textContent = occMax>0? Math.round(occMax)+'% 점유' : '데이터 수집 중';  // 피크 점유율 표시
+
+    // 이용 유형(작업형/음료형/기타) 비율 그리기
+    const ty = d.type || {work:0,drink:0,etc:0};  // 이용 유형별 세션 수를 가져옴
+    const tw=ty.work||0, td=ty.drink||0, te=ty.etc||0, tt=tw+td+te;  // 각 유형 수와 전체 합 계산
+    const split=document.getElementById('split'); split.innerHTML='';  // 비율 막대 영역을 비움
+    if(tt>0){  // 세션이 하나라도 있으면
+      const seg=(v,c)=> v>0?`<div class="seg ${c}" style="width:${v/tt*100}%">${Math.round(v/tt*100)}%</div>`:'';  // 유형별 막대 조각 생성 함수
+      split.innerHTML = seg(tw,'w')+seg(td,'d')+seg(te,'e');  // 작업/음료/기타 막대를 그림
+    }
+    document.getElementById('leg-w').textContent=tw;  // 작업형 세션 수 표시
+    document.getElementById('leg-d').textContent=td;  // 음료형 세션 수 표시
+    document.getElementById('leg-e').textContent=te;  // 기타 세션 수 표시
+    const workShare = tt>0? Math.round(tw/tt*100) : 0;  // 작업형 비중(%) 계산
+    document.getElementById('k-work').textContent = tt>0? workShare+'%' : '–';  // 작업형 비중 KPI 표시
+
+    // 평균 체류시간 계산·표시
+    const dw=d.dwell||{};  // 체류시간 통계를 가져옴
+    const wAvg = dw.work_n>0? dw.work_sum/dw.work_n : null;  // 작업형 평균 체류시간 계산
+    const dAvg = dw.drink_n>0? dw.drink_sum/dw.drink_n : null;  // 음료형 평균 체류시간 계산
+    document.getElementById('dw-w').innerHTML = (wAvg!==null? wAvg.toFixed(0):'–')+'<small> 분</small>';  // 작업형 평균 체류시간 표시
+    document.getElementById('dw-d').innerHTML = (dAvg!==null? dAvg.toFixed(0):'–')+'<small> 분</small>';  // 음료형 평균 체류시간 표시
+
+    // 성별 비율(보조 지표) 그리기
+    const g=d.gender||{}; const gm=g.male||0,gf=g.female||0,gu=g.unknown||0,gt=gm+gf+gu;  // 남/여/미상 수와 합 계산
+    const gs=document.getElementById('gsplit'); gs.innerHTML='';  // 성별 막대 영역을 비움
+    if(gt>0){  // 성별 데이터가 있으면
+      const seg=(v,c)=> v>0?`<div class="seg ${c}" style="width:${v/gt*100}%;background:${c}">${Math.round(v/gt*100)}%</div>`:'';  // 막대 조각 생성 함수
+      gs.innerHTML = `<div class="seg" style="width:${gm/gt*100}%;background:var(--male);color:#0E1726;font-weight:700">${gm>0?Math.round(gm/gt*100)+'%':''}</div>
+                      <div class="seg" style="width:${gf/gt*100}%;background:var(--female);color:#0E1726;font-weight:700">${gf>0?Math.round(gf/gt*100)+'%':''}</div>
+                      <div class="seg" style="width:${gu/gt*100}%;background:#3A4A66;color:var(--muted)">${gu>0?Math.round(gu/gt*100)+'%':''}</div>`;  // 남/여/미상 막대를 그림
+    }
+    document.getElementById('g-m').textContent=gm;  // 남성 수 표시
+    document.getElementById('g-f').textContent=gf;  // 여성 수 표시
+    document.getElementById('g-u').textContent=gu;  // 미상 수 표시
+
+    // 운영 제안(규칙 기반) 만들기
+    const tips=[];  // 제안 문구를 담을 배열
+    if(tt>0 && workShare>=55 && occMax>=70)  // 작업형 비중이 높고 점유율도 높으면
+      tips.push(`작업형 고객이 <b>${workShare}%</b>로 많고 피크 점유율이 <b>${Math.round(occMax)}%</b>입니다. 좌석 회전이 정체되니 <b>콘센트석 분리·시간대 요금제</b> 도입을 검토하세요.`);  // 좌석 회전 개선 제안 추가
+    if(wAvg!==null && dAvg!==null && wAvg >= dAvg*2)  // 작업형 체류가 음료형의 2배 이상이면
+      tips.push(`작업형 평균 체류(<b>${wAvg.toFixed(0)}분</b>)가 음료형(<b>${dAvg.toFixed(0)}분</b>)의 2배 이상입니다. 회전을 높이려면 <b>그랩앤고 메뉴·바 좌석</b>을 늘려 음료형 유입을 키우세요.`);  // 회전율 제안 추가
+    // 가장 한산한 시간대(표본 존재) 찾기
+    let quiet=null, qv=999;  // 가장 한산한 시간과 그 점유율 초기화
+    for(let h=0;h<24;h++){ const c=hourly[String(h).padStart(2,'0')]||{}; if(c.occ_n>0){const v=avgOcc(c,seats); if(v<qv){qv=v;quiet=h;}} }  // 점유율이 가장 낮은 시간대 탐색
+    if(quiet!==null && occMax>0 && qv < occMax*0.5)  // 충분히 한산한 시간대가 있으면
+      tips.push(`<b>${quiet}시</b>대가 가장 한산합니다(점유율 ${Math.round(qv)}%). 이 시간대 <b>할인·쿠폰</b>으로 유휴 좌석을 매출로 전환하세요.`);  // 할인 제안 추가
+    const tipBox=document.getElementById('tips'); tipBox.innerHTML='';  // 제안 영역을 비움
+    if(tips.length===0 && (d.total||0)===0){  // 아직 데이터가 없으면
+      tipBox.innerHTML = `<div class="tip">데이터가 쌓이면 이곳에 <b>운영 개선 제안</b>이 자동으로 표시됩니다.</div>`;  // 안내 문구 표시
+    } else {  // 제안이 있으면
+      tips.slice(0,3).forEach(t=>{ const el=document.createElement('div'); el.className='tip'; el.innerHTML='💡 '+t; tipBox.appendChild(el); });  // 최대 3개 제안을 표시
+    }
+  }
+
+  // 실시간 카메라 스트림 연결 (analyze.py가 5001 포트로 송출)
+  (function initCam(){  // 페이지가 열리면 즉시 실행되는 함수
+    const img = document.getElementById('cam');  // 영상이 표시될 <img> 요소를 가져옴
+    const msg = document.getElementById('cam-msg');  // 안내 문구 요소를 가져옴
+    const src = location.protocol + '//' + location.hostname + ':5001/video';  // 접속한 주소를 기준으로 영상 주소(5001 포트)를 만듦
+    img.onload  = () => { img.style.display='block'; msg.style.display='none'; };  // 영상이 연결되면 화면에 표시하고 안내 문구 숨김
+    img.onerror = () => { img.style.display='none';  msg.style.display='block';  // 연결 실패 시 영상 숨기고 안내 표시
+                          msg.textContent='카메라 연결 대기 중… (analyze.py 실행 후 잠시 기다려 주세요)';
+                          setTimeout(()=>{ img.src = src + '?t=' + Date.now(); }, 3000); };  // 3초 후 다시 연결 시도
+    img.src = src;  // 영상 주소를 연결
+  })();
+
+  refresh();  // 페이지가 열리면 통계를 한 번 갱신
+  setInterval(refresh, 4000);  // 이후 4초마다 자동으로 통계를 갱신
+</script>
+</body>
+</html>
